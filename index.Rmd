@@ -1,0 +1,360 @@
+---
+title: "Tarea_03"
+output: html_document
+---
+  
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+## Carga de documentos 
+```{r bibliotecas, include=FALSE, message=FALSE}
+library(sf)
+library(raster)
+library(dplyr)
+library(spData)
+library(leaflet)
+library(plotly)
+library(DT)
+```
+
+
+```{r data, echo=TRUE, message=FALSE, warning=FALSE, quiet=TRUE}
+monitos <-
+  st_read(
+    "https://raw.githubusercontent.com/gf0604-procesamientodatosgeograficos/2021i-datos/main/gbif/primates-cr-registros.csv",
+    options = c(
+      "X_POSSIBLE_NAMES=decimalLongitude",
+      "Y_POSSIBLE_NAMES=decimalLatitude"
+    ),
+    quiet = TRUE
+  )
+```
+## Asignación de CRS
+```{r cruce-data, message=FALSE,echo=TRUE}
+
+st_crs(monitos) = 4326
+
+# Capa Geoespacial de cantones
+cantones <-
+  st_read(
+    "https://raw.githubusercontent.com/gf0604-procesamientodatosgeograficos/2021i-datos/main/ign/delimitacion-territorial-administrativa/cr_cantones_simp_wgs84.geojson",
+    quiet = TRUE
+  )
+provincias <-
+  st_read(
+    "https://raw.githubusercontent.com/gf0604-procesamientodatosgeograficos/2021i-datos/main/ign/delimitacion-territorial-administrativa/cr_provincias_simp_wgs84.geojson",
+    quiet = TRUE
+  )
+
+
+# Cruce espacial con la tabla de cantones, para obtener el nombre del cantón
+monitos <-
+  monitos %>%
+  st_join(cantones["canton"])
+```
+
+# Introducción  
+
+En la tarea se tarbajan con cuatro especies de monitos en Costa Rica. 
+
+Monito Araña,Los monos araña tienen extremidades extremadamente largas y colas prensiles. Las colas tienen puntas sin pelo y surcos que se asemejan a huellas dactilares. Los monos tienen cabezas pequeñas con caras sin pelo y fosas nasales anchas.
+
+Monito Ardilla,un primate neotropical perteneciente a la familia Cebidae, posee cola larga, no prensil, con la porción terminal de color negro..
+
+Monito Aullador,se caracterizan porque tienen un hueso hioides desarrollado para realizar esas potentes llamadas, pues este actúa como caja de resonancia natural.
+
+Monito carablanca,muy valioso por su papel como dispersor de semillas y polen.Mono de tamaña mediano.
+
+Se desaroolaran diferentes diseños por los cuales se vizualizaran los datos registrados de estos incluyendo ubicando (provincia y cantón)
+
+
+```{r tabla-registros, message=FALSE}
+
+# Tabla de registros de presencia
+monitos %>%
+  st_drop_geometry() %>%
+  dplyr::select(family, species, stateProvince, locality, eventDate) %>%
+  datatable(
+    colnames = c("Familia", "Especies", "Provincia", "Localidad", "Fecha"),
+    options = list(
+      searchHighlight = TRUE,
+      language = list(url = '//cdn.datatables.net/plug-ins/1.10.11/i18n/Spanish.json')
+    )
+  )
+```
+## Tabla de registros
+
+```{r procentajes, message=FALSE,echo=TRUE, include=FALSE}
+sum(with(monitos, species == "Ateles geoffroyi"))
+sum(with(monitos, species == "Cebus capucinus"))
+sum(with(monitos, species == "Alouatta palliata"))
+sum(with(monitos, species == "Saimiri oerstedii"))
+
+cantidad <- c(599, 1463, 1994, 453)
+tipos <-
+  c("Mono Araña", "Mono Carablanca", "Mono Aullador", "Mono Ardilla")
+```
+## Gráfico de Registros por especie
+
+```{r gráfico-registros, message=FALSE,echo=TRUE}
+monitos %>%
+  plot_ly(
+    labels = ~ tipos,
+    values = ~ cantidad,
+    type = "pie",
+    textposition = "inside",
+    textinfo = "label+percent"
+  ) %>%
+  config(locale = "es") %>%
+  layout(
+    title = "Numero de monitos",
+    xaxis = list(
+      showgrid = FALSE,
+      zeroline = FALSE,
+      showticklabels = FALSE
+    ),
+    yaxis = list(
+      showgrid = FALSE,
+      zeroline = FALSE,
+      showticklabels = FALSE
+    )
+  )
+```
+### Creación de los filtros
+```{r filter, message=FALSE,echo=TRUE}
+Araña <- monitos %>%
+  dplyr::select(species,
+                stateProvince,
+                locality,
+                eventDate,
+                decimalLatitude,
+                decimalLongitude) %>%
+  filter(species == 'Ateles geoffroyi')
+
+Carablanca <- monitos %>%
+  dplyr::select(species,
+                stateProvince,
+                locality,
+                eventDate,
+                decimalLatitude,
+                decimalLongitude) %>%
+  filter(species == 'Cebus capucinus')
+
+Aullador <- monitos %>%
+  dplyr::select(species,
+                stateProvince,
+                locality,
+                eventDate,
+                decimalLatitude,
+                decimalLongitude) %>%
+  filter(species == 'Alouatta palliata')
+
+Ardilla <- monitos %>%
+  dplyr::select(species,
+                stateProvince,
+                locality,
+                eventDate,
+                decimalLatitude,
+                decimalLongitude) %>%
+  filter(species == 'Saimiri oerstedii')
+```
+
+### Creación de la capa altitud
+```{r altitud, message=FALSE,echo=TRUE}
+alt <- getData(
+  "worldclim",
+  var = "alt",
+  res = .5,
+  lon = -84,
+  lat = 10
+)
+altitud <-
+  alt %>%
+  crop(provincias) %>%
+  mask(provincias)
+```
+
+## Colores de la capa
+```{r colors, message=FALSE,echo=TRUE}
+rcol <- colorNumeric(c("#DA70D6", "#800080", "#4682B4"),
+                     values(altitud),
+                     na.color = "transparent")
+```
+## Popups de cada especie
+```{r popup, message=FALSE,echo=TRUE}
+monito_araña <- paste0(
+  "<b>",
+  "Especie del primate: ",
+  "</b>",
+  (Araña$species),
+  "<br>",
+  "<b>",
+  "Provincia: ",
+  "</b>",
+  (Araña$stateProvince),
+  "<br>",
+  "<b>",
+  "CantÃ³n: ",
+  "</b>",
+  (Araña$locality),
+  "<br>",
+  "<b>",
+  "Fecha: ",
+  "</b>",
+  (Araña$eventDate),
+  "<br>",
+  "<b>",
+  "Cordenadas: " ,
+  "</b>",
+  (Araña$decimalLongitude),
+  "<br>",
+  (Araña$decimalLatitude)
+)
+monito_ardilla <- paste0(
+  "<b>",
+  "Especie del primate: ",
+  "</b>",
+  (Ardilla$species),
+  "<br>",
+  "<b>",
+  "Provincia: ",
+  "</b>",
+  (Ardilla$stateProvince),
+  "<br>",
+  "<b>",
+  "CantÃ³n: ",
+  "</b>",
+  (Ardilla$locality),
+  "<br>",
+  "<b>",
+  "Fecha: ",
+  "</b>",
+  (Ardilla$eventDate),
+  "<br>",
+  "<b>",
+  "Cordenadas: " ,
+  "</b>",
+  (Ardilla$decimalLongitude),
+  "<br>",
+  (Ardilla$decimalLatitude)
+)
+monito_aullador <- paste0(
+  "<b>",
+  "Especie del primate: ",
+  "</b>",
+  (Aullador$species),
+  "<br>",
+  "<b>",
+  "Provincia: ",
+  "</b>",
+  (Aullador$stateProvince),
+  "<br>",
+  "<b>",
+  "CantÃ³n: ",
+  "</b>",
+  (Aullador$locality),
+  "<br>",
+  "<b>",
+  "Fecha: ",
+  "</b>",
+  (Aullador$eventDate),
+  "<br>",
+  "<b>",
+  "Cordenadas: " ,
+  "</b>",
+  (Aullador$decimalLongitude),
+  "<br>",
+  (Aullador$decimalLatitude)
+)
+monito_carablanca <- paste0(
+  "<b>",
+  "Especie del primate: ",
+  "</b>",
+  (Carablanca$species),
+  "<br>",
+  "<b>",
+  "Provincia: ",
+  "</b>",
+  (Carablanca$stateProvince),
+  "<br>",
+  "<b>",
+  "CantÃ³n: ",
+  "</b>",
+  (Carablanca$locality),
+  "<br>",
+  "<b>",
+  "Fecha: ",
+  "</b>",
+  (Carablanca$eventDate),
+  "<br>",
+  "<b>",
+  "Cordenadas: " ,
+  "</b>",
+  (Carablanca$decimalLongitude),
+  "<br>",
+  (Carablanca$decimalLatitude)
+)
+```
+### Creación del Mapa
+```{r mapa, echo=TRUE, message=FALSE, warning=FALSE}
+monitos %>%
+  leaflet() %>%
+  addProviderTiles(providers$OpenStreetMap.Mapnik, group = "OpenStreetMap") %>%
+  addProviderTiles(providers$Stamen.TonerLite, group = "Stamen Toner Lite") %>%
+  addProviderTiles(providers$Esri.WorldImagery, group = "Imágenes de ESRI") %>%
+  addRasterImage(altitud,
+                 colors = rcol,
+                 opacity = 0.8,
+                 group = "Altitud") %>%
+  addCircleMarkers(
+    data = Araña,
+    stroke = F,
+    radius = 4,
+    fillColor = '#7B68EE',
+    fillOpacity = 1,
+    popup = monito_araña,
+    group = "Ateles geoffroyi"
+  ) %>%
+  addCircleMarkers(
+    data = Ardilla,
+    stroke = F,
+    radius = 4,
+    fillColor = '#9ACD32',
+    fillOpacity = 1,
+    popup = monito_ardilla,
+    group = "Saimiri oerstedii"
+  ) %>%
+  addCircleMarkers(
+    data = Aullador,
+    stroke = F,
+    radius = 4,
+    fillColor = '#F4A460',
+    fillOpacity = 1,
+    popup = monito_aullador,
+    group = "Alouatta palliata"
+  ) %>%
+  addCircleMarkers(
+    data = Carablanca,
+    stroke = F,
+    radius = 4,
+    fillColor = '#48D1CC',
+    fillOpacity = 1,
+    popup = monito_carablanca,
+    group = "Cebus capucinus"
+  ) %>%
+  addLayersControl(
+    baseGroups = c("OpenStreetMap", "Stamen Toner Lite", "Imágenes de ESRI"),
+    overlayGroups = c(
+      "Ateles geoffroyi",
+      "Cebus capucinus",
+      "Alouatta palliata",
+      "Saimiri oerstedii",
+      "altitud"
+    )
+  ) %>%
+  addMiniMap(
+    tiles = providers$Stamen.OpenStreetMap.Mapnik,
+    position = "bottomleft",
+    toggleDisplay = TRUE
+  )
+```
